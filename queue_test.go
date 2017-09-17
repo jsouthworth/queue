@@ -69,6 +69,16 @@ func testQueueTryDequeue(t *testing.T, cons queueCons) {
 	assert(t, ok, "Dequeue should have succeeded")
 }
 
+func testQueueDequeueOrClosed(t *testing.T, cons queueCons) {
+	q := cons()
+	q.Enqueue(1)
+	q.Close()
+	v, ok := q.DequeueOrClosed()
+	assert(t, ok && v == 1, "DequeueOrClosed should have returned a value")
+	v, ok = q.DequeueOrClosed()
+	assert(t, !ok && v == nil, "DequeueOrClosed should not have returned a value")
+}
+
 func testQueueBlockingTryDequeue(t *testing.T, cons queueCons) {
 	q := cons()
 	_, ok := q.TryDequeue()
@@ -165,6 +175,9 @@ func testQueueSemantics(t *testing.T, cons queueCons) {
 	})
 	t.Run("TryDequeue", func(t *testing.T) {
 		testQueueTryDequeue(t, cons)
+	})
+	t.Run("DequeueOrClosed", func(t *testing.T) {
+		testQueueDequeueOrClosed(t, cons)
 	})
 	t.Run("BlockingTryDequeue", func(t *testing.T) {
 		testQueueBlockingTryDequeue(t, cons)
@@ -327,5 +340,32 @@ func TestList(t *testing.T) {
 	for i := 1; i < 5; i++ {
 		assert(t, tmp.Item() == i, "Incorrect entry at element")
 		tmp = tmp.Next()
+	}
+}
+
+func TestRange(t *testing.T) {
+	q := NewUnbounded()
+	for i := 0; i < 10; i++ {
+		q.Enqueue(i)
+	}
+	q.Close()
+	count := 0
+	Range(q, func(v interface{}) {
+		count += v.(int)
+	})
+	assert(t, count == 45, "Count didn't equal expected value")
+}
+
+func TestMove(t *testing.T) {
+	q := NewUnbounded()
+	for i := 0; i < 10; i++ {
+		q.Enqueue(i)
+	}
+	q.Close()
+	q2 := NewUnbounded()
+	Move(q2, q)
+	q2.Close()
+	for i := 0; i < 10; i++ {
+		assert(t, q2.Dequeue() == i, "Incorrect entry at element")
 	}
 }

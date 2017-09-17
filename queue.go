@@ -1,3 +1,8 @@
+//Package queue implements a set of synchronization queues and some generic
+//algorithms that will operate on these queues.
+//The queues are similar to go channels in purpose but allow for
+//extensible semantics when the synchronization pattern provided by channels
+//does not naturally fit the problem domain.
 package queue
 
 import (
@@ -16,12 +21,45 @@ var (
 	bigOne  = big.NewInt(1)
 )
 
+//The Queue interface represents the abstract notion of a synchronization
+//queue. Queues have a relatively small interface with some specific
+//semantics that need to be accounted for.
 type Queue interface {
+	//Enqueue adds an item to the end of the queue.
+	//It is safe to Enqueue on a closed queue.
 	Enqueue(item interface{})
+	//TryEnqueue adds an item and returns whether the act was successful
 	TryEnqueue(item interface{}) (success bool)
+	//Dequeue blocks until an item is in the queue then returns that item
+	//unless the queue is closed in which case it returns nil.
 	Dequeue() (item interface{})
+	//TryDequeue tries to dequeue an item and returns whether
+	//it was successful it may be unsuccessful if the queue was empty
+	//or closed.
 	TryDequeue() (item interface{}, success bool)
+	//DequeueOrClosed returns an item or will return that the queue
+	//is closed.
+	DequeueOrClosed() (item interface{}, closed bool)
+	//Close closes a queue, which creates a sentinal value that will
+	//always be returned when the queue is closed. It is safe to
+	//close a queue more than once.
 	Close()
+}
+
+//Range calls the fn on each enqueued item until the queue is closed
+func Range(q Queue, fn func(item interface{})) {
+	for i, ok := q.DequeueOrClosed(); ok; i, ok = q.DequeueOrClosed() {
+		fn(i)
+	}
+}
+
+//Move moves items from one queue to another. The input queue must be
+//closed prior to calling Move otherwise Move will loop forever reenqueuing
+//items.
+func Move(out Queue, in Queue) {
+	Range(in, func(v interface{}) {
+		out.Enqueue(v)
+	})
 }
 
 type coalescedQueue struct {
@@ -31,6 +69,14 @@ type coalescedQueue struct {
 	updated bool
 }
 
+//A coalesced queue, is useful when one does not care about missed updates.
+//That is specific cases where the last value in is what matters, not the
+//interveaning values. This can be used to notify another process when a
+//subscribed value changes, but to account for cases where the consumer is
+//slower than the value changes and the last change before the consumer
+//catches up has enough information for it to continue.
+//These semantics will not always be useful but are what is desired
+//in some scenarios.
 func NewCoalesced() Queue {
 	return &coalescedQueue{
 		cond: sync.NewCond(&sync.Mutex{}),
@@ -62,6 +108,9 @@ func (q *coalescedQueue) Dequeue() (item interface{}) {
 func (q *coalescedQueue) TryDequeue() (interface{}, bool) {
 	return q.dequeue(false)
 }
+func (q *coalescedQueue) DequeueOrClosed() (interface{}, bool) {
+	return q.dequeue(true)
+}
 func (q *coalescedQueue) dequeue(block bool) (interface{}, bool) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
@@ -89,6 +138,11 @@ type unboundedQueue struct {
 	length *big.Int
 }
 
+//An unbounded queue, will grow without bounds. This is useful in unpredictable
+//bursty scenarios. The only feedback mechanism for this queue is memory
+//pressure. Caution should be taken when using an unbounded queue.
+//If the producer constantly overruns the consumer then the queue will never
+//drain.
 func NewUnbounded() Queue {
 	return &unboundedQueue{
 		cond:   sync.NewCond(&sync.Mutex{}),
@@ -128,6 +182,10 @@ func (q *unboundedQueue) TryDequeue() (interface{}, bool) {
 	return q.dequeue(false)
 }
 
+func (q *unboundedQueue) DequeueOrClosed() (interface{}, bool) {
+	return q.dequeue(true)
+}
+
 func (q *unboundedQueue) Close() {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
@@ -156,13 +214,15 @@ type boundedQueue struct {
 	ch     chan interface{}
 }
 
-func NewBounded(len int) Queue {
-	return newBounded(len)
+//A bounded queue has the semantics of a go channel that drops
+//on enqueue when full.
+func NewBounded(limit int) Queue {
+	return newBounded(limit)
 }
 
-func newBounded(len int) *boundedQueue {
+func newBounded(limit int) *boundedQueue {
 	return &boundedQueue{
-		ch: make(chan interface{}, len),
+		ch: make(chan interface{}, limit),
 	}
 }
 
@@ -204,6 +264,10 @@ func (q *boundedQueue) TryDequeue() (interface{}, bool) {
 		return nil, false
 	}
 }
+func (q *boundedQueue) DequeueOrClosed() (interface{}, bool) {
+	val, ok := <-q.ch
+	return val, ok
+}
 
 func (q *boundedQueue) Close() {
 	q.mu.Lock()
@@ -219,6 +283,7 @@ type blockingQueue struct {
 	*boundedQueue
 }
 
+//A blocking queue has the same semantics as a go channel.
 func NewBlocking(limit int) Queue {
 	return &blockingQueue{
 		boundedQueue: newBounded(limit),
