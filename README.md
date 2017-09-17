@@ -6,4 +6,4 @@ This project is just some experiments with different queuing strategies for slow
 
 Docs
 ----
-godoc.org/github.com/jsouthworth/queue
+[godoc.org/github.com/jsouthworth/queue](https://godoc.org/github.com/jsouthworth/queue)
