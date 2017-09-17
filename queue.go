@@ -157,6 +157,10 @@ type boundedQueue struct {
 }
 
 func NewBounded(len int) Queue {
+	return newBounded(len)
+}
+
+func newBounded(len int) *boundedQueue {
 	return &boundedQueue{
 		ch: make(chan interface{}, len),
 	}
@@ -209,6 +213,25 @@ func (q *boundedQueue) Close() {
 	}
 	q.closed = true
 	close(q.ch)
+}
+
+type blockingQueue struct {
+	*boundedQueue
+}
+
+func NewBlocking(limit int) Queue {
+	return &blockingQueue{
+		boundedQueue: newBounded(limit),
+	}
+}
+
+func (q *blockingQueue) Enqueue(item interface{}) {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	if q.closed {
+		return
+	}
+	q.ch <- item
 }
 
 type list struct {

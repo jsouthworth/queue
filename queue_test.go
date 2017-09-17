@@ -291,3 +291,41 @@ func TestBoundedDequeueWhenFull(t *testing.T) {
 	_, ok := q.TryDequeue()
 	assert(t, !ok, "TryDequeue should have failed")
 }
+
+func TestBlockingQueueSemantics(t *testing.T) {
+	testQueueSemantics(t, func() Queue {
+		return NewBlocking(10)
+	})
+}
+func TestBlockingEnqueueWhenFull(t *testing.T) {
+	q := NewBlocking(10)
+	for i := 0; i < 10; i++ {
+		q.Enqueue(i)
+	}
+	sync := make(chan struct{})
+	go func() {
+		q.Enqueue(10)
+		close(sync)
+	}()
+	select {
+	case <-sync:
+		t.Fatal("Enqueue should have blocked")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+}
+
+func TestList(t *testing.T) {
+	li := newList(1)
+	assert(t, li.Item() == 1, "List didn't return expected item")
+	assert(t, li.Next() == nil, "List Next should be nil")
+	li.Append(newList(2))
+	li.Append(newList(3))
+	li.Append(newList(4))
+	assert(t, li.Next() != nil, "List Next shouldn't be nil")
+	tmp := li
+	for i := 1; i < 5; i++ {
+		assert(t, tmp.Item() == i, "Incorrect entry at element")
+		tmp = tmp.Next()
+	}
+}
