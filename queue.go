@@ -10,12 +10,6 @@ import (
 	"sync"
 )
 
-const (
-	dropWhenFull = iota
-	stopWhenFull
-	coalesceWhenFull
-)
-
 var (
 	bigZero = big.NewInt(0)
 	bigOne  = big.NewInt(1)
